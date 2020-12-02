@@ -3,10 +3,10 @@ HII OSM CSV
 
 ## What does this task do?
 
-1. Fetch Open Street Map PBF file (default: https://osm.openarchive.site/planet-latest.osm.pbf)
-2. Convert PBF file to CSV file, filtered by OSM tags (see: `config.py`)
+1. Fetch OSM pbf file
+2. Convert PBF file -> CSV files (for each layer) using OGR
 3. Upload filtered CSV file to Google Cloud Storage
-4. Using Earth Engine CLI load CSV as table in Earth Engine
+4. Using earthengine CLI load CSV as table (temporary) in EE
 
 
 

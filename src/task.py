@@ -34,6 +34,7 @@ class HIIOSMCSV(HIITask):
 
     ee_osm_root = "osm"
     google_creds_path = "/.google_creds"
+    MIN_GEOM_AREA = 5 # in meters
 
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
@@ -111,7 +112,7 @@ class HIIOSMCSV(HIITask):
                     if "POLYGON" in wkt:
                         geom = shp_wkt.loads(wkt)
                         area = abs(geod.geometry_area_perimeter(geom)[0])
-                        if area < 5:  # 5m
+                        if area < self.MIN_GEOM_AREA:
                             continue
 
                     fw.write(f'"{wkt}","{tag}","1"\n')
