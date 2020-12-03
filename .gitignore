@@ -132,3 +132,4 @@ dmypy.json
 working/
 *.pbf
 src/*.csv
+.vscode/
