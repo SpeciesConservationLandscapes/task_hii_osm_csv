@@ -34,7 +34,8 @@ class HIIOSMCSV(HIITask):
 
     ee_osm_root = "osm"
     google_creds_path = "/.google_creds"
-    MIN_GEOM_AREA = 5 # in meters
+    MIN_GEOM_AREA = 5  # in meters
+    POLYGON_PRECISION = 6
 
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
@@ -99,6 +100,19 @@ class HIIOSMCSV(HIITask):
         except subprocess.CalledProcessError as err:
             raise ConversionException(err.stdout)
 
+    def _is_valid_polygon(self, wkt: str, geod: Geod) -> bool:
+        geom = shp_wkt.loads(
+            shp_wkt.dumps(shp_wkt.loads(wkt), rounding_precision=self.POLYGON_PRECISION)
+        )
+        if geom.is_valid is False or geom.is_empty is True:
+            return False
+
+        area = abs(geod.geometry_area_perimeter(geom)[0])
+        if area < self.MIN_GEOM_AREA:
+            return False
+
+        return True
+
     @timing
     def add_burn_value(self, csv_file: str, output_file: str):
         geod = Geod(ellps="WGS84")
@@ -109,11 +123,9 @@ class HIIOSMCSV(HIITask):
                     idx = row.rindex(" ")
                     wkt = row[0:idx]
                     tag = row[idx + 1 : -1]
-                    if "POLYGON" in wkt:
-                        geom = shp_wkt.loads(wkt)
-                        area = abs(geod.geometry_area_perimeter(geom)[0])
-                        if area < self.MIN_GEOM_AREA:
-                            continue
+
+                    if "POLYGON" in wkt and self._is_valid_polygon(wkt, geod) is False:
+                        continue
 
                     fw.write(f'"{wkt}","{tag}","1"\n')
 
