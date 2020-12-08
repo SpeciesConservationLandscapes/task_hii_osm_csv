@@ -104,7 +104,7 @@ class HIIOSMCSV(HIITask):
         # Doing it this way for backwards compatibility for python
         # versions less than v3.8
         try:
-            Path(path).unlink(missing_ok=True)
+            Path(path).unlink()
         except FileNotFoundError:
             pass
 
