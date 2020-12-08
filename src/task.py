@@ -84,7 +84,9 @@ class HIIOSMCSV(HIITask):
             config = json.loads(fr.read())
             return [at.split("=") for at in config.get("include_tags") or []]
 
-    def _create_files(self, directory: str, attributes_tags: List[tuple]) -> Dict[str, TextIO]:
+    def _create_files(
+        self, directory: str, attributes_tags: List[tuple]
+    ) -> Dict[str, TextIO]:
         files = {}
         for attribute, tag in attributes_tags:
             files[f"{attribute}={tag}"] = open(
@@ -98,7 +100,9 @@ class HIIOSMCSV(HIITask):
             if f and f.closed is False:
                 f.close()
 
-    def _get_row_attribute_tag(self, attribute_tag: str, attributes_tags: List[List[str]]) -> Optional[List[str]]:
+    def _get_row_attribute_tag(
+        self, attribute_tag: str, attributes_tags: List[List[str]]
+    ) -> Optional[List[str]]:  # noqa: C901
         try:
             if "=" not in attribute_tag:
                 return None
@@ -111,7 +115,7 @@ class HIIOSMCSV(HIITask):
                     if attr_tag is not None and attr_tag in attributes_tags:
                         return attr_tag
             return None
-        except Exception as err:
+        except (TypeError, ValueError):
             return None
 
     def download_osm(self) -> str:
@@ -141,7 +145,9 @@ class HIIOSMCSV(HIITask):
         except subprocess.CalledProcessError as err:
             raise ConversionException(err.stdout)
 
-    def _clean_geometry(self, wkt: str, geod: Geod, failFast: bool = False) -> Optional[str]:
+    def _clean_geometry(
+        self, wkt: str, geod: Geod, failFast: bool = False
+    ) -> Optional[str]:  # noqa: C901
         if "POLYGON" not in wkt:
             return wkt
 
@@ -174,7 +180,9 @@ class HIIOSMCSV(HIITask):
                 idx = row.rindex(" ")
 
                 attribute_tag = self._get_row_attribute_tag(
-                    row[idx + 1 : -1], attributes_tags
+                    # fmt: off
+                    row[idx + 1: -1], attributes_tags
+                    # fmt: on
                 )
                 if attribute_tag is None:
                     # TODO: Log out
@@ -209,7 +217,6 @@ class HIIOSMCSV(HIITask):
 
             for future in as_completed(futures):
                 future.result()
-                    
 
     def calc(self):
         if self.csv_file is None:
