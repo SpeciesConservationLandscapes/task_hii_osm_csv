@@ -100,6 +100,14 @@ class HIIOSMCSV(HIITask):
             if f and f.closed is False:
                 f.close()
 
+    def _unlink(self, path: str):
+        # Doing it this way for backwards compatibility for python
+        # versions less than v3.8
+        try:
+            Path(path).unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
+
     def _get_row_attribute_tag(
         self, attribute_tag: str, attributes_tags: List[List[str]]
     ) -> Optional[List[str]]:  # noqa: C901
@@ -239,9 +247,9 @@ class HIIOSMCSV(HIITask):
         if self.status == self.FAILED:
             return
 
-        Path(self.osm_file).unlink(missing_ok=True)
-        Path(self.csv_file).unlink(missing_ok=True)
-        Path(self.directory).unlink(missing_ok=True)
+        self._unlink(self.osm_file)
+        self._unlink(self.csv_file)
+        self._unlink(self.directory)
 
 
 if __name__ == "__main__":
