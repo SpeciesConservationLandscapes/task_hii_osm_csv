@@ -3,3 +3,5 @@ samples/
 src/*.pbf
 src/*.csv
 *.csv
+temp/
+temp/*.csv

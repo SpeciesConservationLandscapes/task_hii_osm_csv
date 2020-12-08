@@ -1,19 +1,22 @@
 import argparse
+import json
+import multiprocessing
 import os
 import shutil
 import subprocess
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, TextIO
 
 import requests
 from google.cloud.storage import Client  # type: ignore
 from pyproj import Geod
 from shapely import wkt as shp_wkt  # type: ignore
-from task_base import HIITask  # type: ignore
 
-from timer import timing
+# from shapely.validation import explain_validity
+from task_base import HIITask  # type: ignore
 
 
 class ConversionException(Exception):
@@ -26,16 +29,17 @@ class HIIOSMCSV(HIITask):
     Process:
 
     1. Fetch OSM pbf file
-    2. Convert PBF file -> CSV files (for each layer) using OGR
-    3. Upload filtered CSV file to Google Cloud Storage
-    4. Using earthengine CLI load CSV as table (temporary) in EE
+    2. Convert PBF file -> Text file (filter by attribute/tag list)
+    3. Split up text file by attribute and tags into CSV files
+        -> cleans and validates geometry
+    4. Using CSV files to Google Storage
 
     """
 
     ee_osm_root = "osm"
     google_creds_path = "/.google_creds"
     MIN_GEOM_AREA = 5  # in meters
-    POLYGON_PRECISION = 6
+    POLYGON_PRECISION = 5
 
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
@@ -51,6 +55,10 @@ class HIIOSMCSV(HIITask):
             with open(str(creds_path), "w") as f:
                 f.write(self.service_account_key)
 
+    @property
+    def directory(self):
+        return f"/app/tmp/{self.taskdate}"
+
     def _unique_file_name(self, ext: str, prefix: Optional[str] = None) -> str:
         name = f"{uuid.uuid4()}.{ext}"
         if prefix:
@@ -63,15 +71,49 @@ class HIIOSMCSV(HIITask):
         return f"{root}/{attribute}/{tag}/{tag}_{task_date}"
 
     def _upload_to_cloudstorage(self, src_path: str) -> str:
-        targ_path = Path(src_path).name
+        targ_path = Path(str(self.taskdate), Path(src_path).name)
         client = Client()
         bucket = client.bucket(os.environ["HII_OSM_BUCKET"])
-        blob = bucket.blob(targ_path)
-        blob.upload_from_filename(src_path)
+        blob = bucket.blob(str(targ_path))
+        blob.upload_from_filename(src_path, timeout=3600)
 
-        return targ_path
+        return str(targ_path)
 
-    @timing
+    def _get_tags(self) -> List[List[str]]:
+        with open("config.json", "r") as fr:
+            config = json.loads(fr.read())
+            return [at.split("=") for at in config.get("include_tags") or []]
+
+    def _create_files(self, directory: str, attributes_tags: List[tuple]) -> Dict[str, TextIO]:
+        files = {}
+        for attribute, tag in attributes_tags:
+            files[f"{attribute}={tag}"] = open(
+                Path(directory, f"{attribute}_{tag}.csv"), "w"
+            )
+            files[f"{attribute}={tag}"].write('"WKT","tag","burn"\n')
+        return files
+
+    def _close_files(self, files: Dict[str, TextIO]):
+        for f in files.values():
+            if f and f.closed is False:
+                f.close()
+
+    def _get_row_attribute_tag(self, attribute_tag: str, attributes_tags: List[List[str]]) -> Optional[List[str]]:
+        try:
+            if "=" not in attribute_tag:
+                return None
+            elif "," not in attribute_tag:
+                return [t.strip() for t in attribute_tag.split("=")]
+            else:
+                _attribute_tags = attribute_tag.split(",")
+                for tags in _attribute_tags:
+                    attr_tag = self._get_row_attribute_tag(tags, attributes_tags)
+                    if attr_tag is not None and attr_tag in attributes_tags:
+                        return attr_tag
+            return None
+        except Exception as err:
+            return None
+
     def download_osm(self) -> str:
         file_path = self._unique_file_name(ext="pbf")
 
@@ -81,7 +123,6 @@ class HIIOSMCSV(HIITask):
 
         return file_path
 
-    @timing
     def osm_to_csv(self, osm_file_path: str) -> str:
         output_file = self._unique_file_name(ext="csv")
         try:
@@ -100,47 +141,92 @@ class HIIOSMCSV(HIITask):
         except subprocess.CalledProcessError as err:
             raise ConversionException(err.stdout)
 
-    def _is_valid_polygon(self, wkt: str, geod: Geod) -> bool:
+    def _clean_geometry(self, wkt: str, geod: Geod, failFast: bool = False) -> Optional[str]:
+        if "POLYGON" not in wkt:
+            return wkt
+
         geom = shp_wkt.loads(
             shp_wkt.dumps(shp_wkt.loads(wkt), rounding_precision=self.POLYGON_PRECISION)
-        )
-        if geom.is_valid is False or geom.is_empty is True:
-            return False
+        ).simplify(0)
+        if geom.is_valid is False:
+            if failFast is True:
+                # TODO: print(f"INVALID [{explain_validity(geom)}] - {geom}")
+                return None
+            # Try validating one more time after attempting to clean with buffer
+            return self._clean_geometry(shp_wkt.dumps(geom.buffer(0)), geod, True)
+        elif geom.is_empty is True:
+            # TODO: print(f"EMPTY - {geom}")
+            return None
 
         area = abs(geod.geometry_area_perimeter(geom)[0])
         if area < self.MIN_GEOM_AREA:
-            return False
+            # TODO: print(f"AREA[{area}] - {geom}")
+            return None
 
-        return True
+        return shp_wkt.dumps(geom, rounding_precision=5)
 
-    @timing
-    def add_burn_value(self, csv_file: str, output_file: str):
+    def split_csv_file(
+        self, csv_file: str, files: Dict[str, TextIO], attributes_tags: List[List[str]]
+    ):
         geod = Geod(ellps="WGS84")
         with open(csv_file, "r") as fr:
-            with open(output_file, "w") as fw:
-                fw.write('"WKT","tag","burn"\n')
-                for row in fr:
-                    idx = row.rindex(" ")
-                    wkt = row[0:idx]
-                    tag = row[idx + 1 : -1]
+            for row in fr:
+                idx = row.rindex(" ")
 
-                    if "POLYGON" in wkt and self._is_valid_polygon(wkt, geod) is False:
-                        continue
+                attribute_tag = self._get_row_attribute_tag(
+                    row[idx + 1 : -1], attributes_tags
+                )
+                if attribute_tag is None:
+                    # TODO: Log out
+                    continue
 
-                    fw.write(f'"{wkt}","{tag}","1"\n')
+                wkt = self._clean_geometry(row[0:idx], geod)
+                if wkt is None:
+                    # TODO: Log out
+                    continue
 
-    @timing
-    def import_csv_to_cloud_storage(self, local_path: str) -> str:
+                file_key = f"{attribute_tag[0]}={attribute_tag[1]}"
+                if file_key not in files:
+                    continue
+
+                files[file_key].write(f'"{wkt}","1"\n')
+
+    def import_csv_to_cloud_storage(
+        self, attributes_tags: List[List[str]], directory: str
+    ):
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self.google_creds_path
-        return self._upload_to_cloudstorage(local_path)
+
+        file_paths = [
+            str(Path(directory, f"{attribute}_{tag}.csv"))
+            for attribute, tag in attributes_tags
+        ]
+
+        num_threads = multiprocessing.cpu_count() * 2
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = []
+            for url in file_paths:
+                futures.append(executor.submit(self._upload_to_cloudstorage, url))
+
+            for future in as_completed(futures):
+                future.result()
+                    
 
     def calc(self):
         if self.csv_file is None:
             self.osm_file = self.osm_file or self.download_osm()
-            _csv_file = self.osm_to_csv(self.osm_file)
-            self.csv_file = self.add_burn_value(_csv_file, f"{self.taskdate}.csv")
+            self.csv_file = self.osm_to_csv(self.osm_file)
 
-        return self.import_csv_to_cloud_storage(self.csv_file)
+        attributes_tags = self._get_tags()
+        if Path(self.directory).exists() is False:
+            os.makedirs(self.directory)
+
+        files = self._create_files(self.directory, attributes_tags)
+        try:
+            self.split_csv_file(self.csv_file, files, attributes_tags)
+        finally:
+            self._close_files(files)
+
+        return self.import_csv_to_cloud_storage(attributes_tags, self.directory)
 
     def clean_up(self, **kwargs):
         if self.status == self.FAILED:
@@ -148,6 +234,7 @@ class HIIOSMCSV(HIITask):
 
         Path(self.osm_file).unlink(missing_ok=True)
         Path(self.csv_file).unlink(missing_ok=True)
+        Path(self.directory).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

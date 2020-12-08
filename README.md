@@ -4,9 +4,10 @@ HII OSM CSV
 ## What does this task do?
 
 1. Fetch OSM pbf file
-2. Convert PBF file -> CSV files (for each layer) using OGR
-3. Upload filtered CSV file to Google Cloud Storage
-4. Using earthengine CLI load CSV as table (temporary) in EE
+2. Convert PBF file -> Text file (filter by attribute/tag list)
+3. Split up text file by attribute and tags into CSV files
+    -> cleans and validates geometry
+4. Using CSV files to Google Storage
 
 
 
@@ -34,8 +35,3 @@ optional arguments:
   -c CSV_FILE, --csv_file CSV_FILE
                         CSV file to upload to Earth Engine. Format: WKT,tag,burn
 ```
-
-
-## Limitation
-
-For performance reasons, it is assumed that the OSM tags are unique between attributes.
