@@ -92,7 +92,7 @@ class HIIOSMCSV(HIITask):
             files[f"{attribute}={tag}"] = open(
                 Path(directory, f"{attribute}_{tag}.csv"), "w"
             )
-            files[f"{attribute}={tag}"].write('"WKT","tag","burn"\n')
+            files[f"{attribute}={tag}"].write('"WKT","burn"\n')
         return files
 
     def _close_files(self, files: Dict[str, TextIO]):
@@ -104,7 +104,12 @@ class HIIOSMCSV(HIITask):
         # Doing it this way for backwards compatibility for python
         # versions less than v3.8
         try:
-            Path(path).unlink()
+            _path = Path(path)
+            if _path.is_dir():
+                shutil.rmtree(_path, ignore_errors=True)
+            else:
+                _path.unlink()
+            
         except FileNotFoundError:
             pass
 
