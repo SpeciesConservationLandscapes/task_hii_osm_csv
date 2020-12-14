@@ -49,6 +49,7 @@ class HIIOSMCSV(HIITask):
             self.osm_file = self._args["osm_file"]
 
         self.skip_cleanup = self._args.get("skip_cleanup")
+        action="store_true",
         self.csv_file = self._args.get("csv_file")
         self.osm_url = self._args.get("osm_url") or os.environ["OSM_DATA_SOURCE"]
         creds_path = Path(self.google_creds_path)
@@ -251,6 +252,7 @@ class HIIOSMCSV(HIITask):
 
     def clean_up(self, **kwargs):
         if self.status == self.FAILED or self.skip_cleanup:
+            action="store_true",
             return
         
         self._unlink(self.osm_file)
@@ -286,6 +288,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--skip_cleanup",
+        action="store_true",
         type=bool,
         help="Skip cleaning up temporary task files",
     )
