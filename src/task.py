@@ -48,6 +48,7 @@ class HIIOSMCSV(HIITask):
         if "osm_file" in self._args:
             self.osm_file = self._args["osm_file"]
 
+        self.skip_cleanup = self._args.get("skip_cleanup")
         self.csv_file = self._args.get("csv_file")
         self.osm_url = self._args.get("osm_url") or os.environ["OSM_DATA_SOURCE"]
         creds_path = Path(self.google_creds_path)
@@ -249,9 +250,9 @@ class HIIOSMCSV(HIITask):
         return self.import_csv_to_cloud_storage(attributes_tags, self.directory)
 
     def clean_up(self, **kwargs):
-        if self.status == self.FAILED:
+        if self.status == self.FAILED or self.skip_cleanup:
             return
-
+        
         self._unlink(self.osm_file)
         self._unlink(self.csv_file)
         self._unlink(self.directory)
@@ -283,6 +284,11 @@ if __name__ == "__main__":
         help="CSV file to upload to Earth Engine.  Format: WKT,tag,burn",
     )
 
+    parser.add_argument(
+        "--skip_cleanuup",
+        type=bool,
+        help="Skip cleaning up temporary task files",
+    )
     options = parser.parse_args()
     task = HIIOSMCSV(**vars(options))
     task.run()

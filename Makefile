@@ -5,7 +5,7 @@ build:
 	docker build --no-cache -t $(IMAGE) .
 
 run:
-	docker run --env-file=.env -v `pwd`/src:/app --rm -it --entrypoint python $(IMAGE) task.py
+	docker run --env-file=.env -v `pwd`/src:/app --rm -it --entrypoint python $(IMAGE) task.py --skip_cleanup
 
 shell:
 	docker run --env-file=.env -v `pwd`/src:/app --rm -it --entrypoint bash $(IMAGE)
