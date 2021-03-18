@@ -1,12 +1,12 @@
 from math import ceil
 from pathlib import Path
-from typing import List, Union, Iterator, Tuple, Dict, Any
+from typing import Iterator, List, Tuple, Union
 
-import numba as nb
-import rasterio
-from rasterio import transform
-from rasterio.profiles import Profile
-from rasterio.windows import Window
+import numba as nb  # type: ignore
+import rasterio  # type: ignore
+from rasterio import transform  # type: ignore
+from rasterio.profiles import Profile  # type: ignore
+from rasterio.windows import Window  # type: ignore
 
 
 class ImageStackMetadata:
@@ -26,7 +26,7 @@ def values_check(array):
     return False
 
 
-def get_windows(
+def get_windows(  # noqa: C901
     width: int,
     height: int,
     size: int = 256,
@@ -62,7 +62,7 @@ def get_windows(
         offset_y = offset_y + size
 
 
-def stack_images(
+def stack_images(  # noqa: C901
     image_stack_metadata: ImageStackMetadata,
     output_path: Union[str, Path],
 ) -> Union[None, Path]:
@@ -123,7 +123,7 @@ def split_image(
             raise ValueError("num_splits less than 1")
         elif num_splits == 1:
             return profile
-        
+
         src_transform = ds.profile["transform"]
         width = profile["width"]
         height = profile["height"]
@@ -150,18 +150,21 @@ def split_image(
 
             new_profile["width"] = new_image_width
 
-            meta.read_windows = list(get_windows(
-                width=new_image_width,
-                height=height,
-                size=window_size,
-                offset=(meta.x_read_offset, meta.y_read_offset,)
-            ))
-            
-            meta.write_windows = list(get_windows(
-                width=new_image_width,
-                height=height,
-                size=window_size
-            ))
+            meta.read_windows = list(
+                get_windows(
+                    width=new_image_width,
+                    height=height,
+                    size=window_size,
+                    offset=(
+                        meta.x_read_offset,
+                        meta.y_read_offset,
+                    ),
+                )
+            )
+
+            meta.write_windows = list(
+                get_windows(width=new_image_width, height=height, size=window_size)
+            )
 
             meta.profile = new_profile
             metas.append(meta)
