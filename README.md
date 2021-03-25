@@ -5,10 +5,13 @@ HII OSM CSV
 
 1. Fetch OSM pbf file
 2. Convert PBF file -> Text file (filter by attribute/tag list)
-3. Split up text file by attribute and tags into CSV files
-    -> cleans and validates geometry
-4. Using CSV files to Google Storage
-
+3.
+  a)Split up text file by attribute and tags and 1 million row CSV files
+  b)Clean geometry and write out road tags to a roads CSV file
+4. Rasterize each CSV file.
+5. Merge all tiff into 1 multiband tiff file
+6. Upload to Google Storage
+7. Clean up working directories and files.
 
 
 ## Environment Variables
@@ -23,15 +26,23 @@ OSM_DATA_SOURCE=https://osm.openarchive.site/planet-latest.osm.pbf
 
 ```
 /app # python task.py --help
-usage: task.py [-h] [-d TASKDATE] [-f OSM_FILE] [-u OSM_URL] [-c CSV_FILE]
+usage: task.py [-h] [-d TASKDATE] [-f OSM_FILE] [-u OSM_URL]
+               [--osmium_text_file OSMIUM_TEXT_FILE] [-w WORKING_DIR]
+               [--extent EXTENT] [--backup_step_data]
 
 optional arguments:
   -h, --help            show this help message and exit
   -d TASKDATE, --taskdate TASKDATE
   -f OSM_FILE, --osm_file OSM_FILE
-                        Add local path to OSM source file. If not provided, file will be downloaded
+                        Add local path to OSM source file. If not provided,
+                        file will be downloaded
   -u OSM_URL, --osm_url OSM_URL
-                        Set a different source url to download OSM pbf file
-  -c CSV_FILE, --csv_file CSV_FILE
-                        CSV file to upload to Earth Engine. Format: WKT,tag,burn
+                        Set a different source url to download OSM pbf file.
+  --osmium_text_file OSMIUM_TEXT_FILE
+                        Text file created from osmium export.
+  -w WORKING_DIR, --working_dir WORKING_DIR
+                        Working directory to store files and directories
+                        during processing.
+  --extent EXTENT       Output geographic bounds.
+  --backup_step_data    Backup up osm to text file to Google Cloud Storage
 ```
