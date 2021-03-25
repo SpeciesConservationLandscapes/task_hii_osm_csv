@@ -17,6 +17,9 @@ from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 import requests
 from google.cloud.storage import Client  # type: ignore
 from osgeo import gdal, gdalconst  # type: ignore
+from pyproj import Geod  # type: ignore
+from shapely import wkt as shp_wkt  # type: ignore
+from shapely.validation import explain_validity  # type: ignore
 from task_base import HIITask  # type: ignore
 
 import config
@@ -76,7 +79,9 @@ class HIIOSMRasterize(HIITask):
 
     1. Fetch OSM pbf file
     2. Convert PBF file -> Text file (filter by attribute/tag list)
-    3. Split up text file by attribute and tags and 1 million row CSV files
+    3.
+        a)Split up text file by attribute and tags and 1 million row CSV files
+        b)Clean geometry and write out road tags to a roads CSV file
     4. Rasterize each CSV file.
     5. Merge all tiff into 1 multiband tiff file
     6. Upload to Google Storage
@@ -87,6 +92,9 @@ class HIIOSMRasterize(HIITask):
     ee_osm_root = "osm"
     google_creds_path = "/.google_creds"
     _asset_prefix = f"projects/{HIITask.ee_project}/{ee_osm_root}"
+
+    MIN_GEOM_AREA = 5  # in meters
+    POLYGON_PRECISION = 5
 
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
@@ -178,6 +186,32 @@ class HIIOSMRasterize(HIITask):
 
         return Path(output_file)
 
+    def _clean_geometry(  # noqa: C901
+        self, wkt: Optional[str], geod: Geod, fail_fast: bool = False
+    ) -> Optional[str]:
+        if not wkt or "POLYGON" not in wkt:
+            return wkt
+
+        geom = shp_wkt.loads(
+            shp_wkt.dumps(shp_wkt.loads(wkt), rounding_precision=self.POLYGON_PRECISION)
+        ).simplify(0)
+        if geom.is_valid is False:
+            if fail_fast is True:
+                print(f"INVALID [{explain_validity(geom)}] - {geom}")
+                return None
+            # Try validating one more time after attempting to clean with buffer
+            return self._clean_geometry(shp_wkt.dumps(geom.buffer(0)), geod, True)
+        elif geom.is_empty is True:
+            print(f"EMPTY - {geom}")
+            return None
+
+        area = abs(geod.geometry_area_perimeter(geom)[0])
+        if area < self.MIN_GEOM_AREA:
+            print(f"AREA[{area}] - {geom}")
+            return None
+
+        return shp_wkt.dumps(geom, rounding_precision=5)
+
     @run_in_thread
     def _backup_step_data(
         self, file_paths: Union[str, Path, list], backup_name: Union[str, Path]
@@ -243,6 +277,7 @@ class HIIOSMRasterize(HIITask):
         if Path(output_dir).exists() is False:
             Path(output_dir).mkdir(exist_ok=True)
 
+        geod = Geod(ellps="WGS84")
         max_rows = self.max_rows - 1
         _parse_row = self._parse_row
         _create_file = self._create_file
@@ -269,9 +304,11 @@ class HIIOSMRasterize(HIITask):
 
                     if attr_tag in roads_tags:
                         rd_attr_tag = roads_tags[attr_tag]
-                        roads_file.write(
-                            f'"{wkt}","{rd_attr_tag[0]}","{rd_attr_tag[1]}"\n'
-                        )
+                        wkt = self._clean_geometry(wkt, geod)
+                        if wkt is not None:
+                            roads_file.write(
+                                f'"{wkt}","{rd_attr_tag[0]}","{rd_attr_tag[1]}"\n'
+                            )
 
         roads_file.close()
 
@@ -440,7 +477,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--backup_step_data",
         action="store_true",
-        help="Backup up working data to Google Cloud Storage",
+        help="Backup up osm to text file to Google Cloud Storage",
     )
 
     options = parser.parse_args()
