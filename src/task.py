@@ -1,6 +1,7 @@
 import argparse
 import itertools
 import json
+import math
 import multiprocessing
 import os
 import re
@@ -342,7 +343,7 @@ class HIIOSMRasterize(HIITask):
         self, image_paths: List[Union[str, Path]], output_dir: Union[str, Path]
     ) -> List[Path]:
 
-        num_cpus = multiprocessing.cpu_count() - 1 or 1
+        num_cpus = math.ceil((multiprocessing.cpu_count() - 1) / 2.0) or 1
         output_image_paths = [
             Path(output_dir, f"stacked-{n+1}.tif") for n in range(num_cpus)
         ]
