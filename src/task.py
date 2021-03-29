@@ -211,7 +211,7 @@ class HIIOSMRasterize(HIITask):
             print(f"AREA[{area}] - {geom}")
             return None
 
-        return shp_wkt.dumps(geom, rounding_precision=5)
+        return shp_wkt.dumps(geom, rounding_precision=self.POLYGON_PRECISION)
 
     @run_in_thread
     def _backup_step_data(
