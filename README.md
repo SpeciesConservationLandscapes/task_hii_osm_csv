@@ -6,12 +6,12 @@ HII OSM CSV
 1. Fetch OSM pbf file
 2. Convert PBF file -> Text file (filter by attribute/tag list)
 3.
-  a)Split up text file by attribute and tags and 1 million row CSV files
-  b)Clean geometry and write out road tags to a roads CSV file
-4. Rasterize each CSV file.
-5. Merge all tiff into 1 multiband tiff file
+  a) Split up text file into one CSV file per attribute/tag combination per 1 million rows
+  b) Clean geometry and write out road tags to a roads CSV file
+4. Rasterize each CSV file
+5. Merge all tiff images into 1 multiband tiff file and split image
 6. Upload to Google Storage
-7. Clean up working directories and files.
+7. Clean up working directories and files
 
 
 ## Environment Variables

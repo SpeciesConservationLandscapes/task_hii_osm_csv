@@ -23,7 +23,6 @@ from shapely import wkt as shp_wkt  # type: ignore
 from shapely.validation import explain_validity  # type: ignore
 from task_base import HIITask  # type: ignore
 
-import config
 import raster_utils
 from timer import Timer
 
@@ -44,9 +43,8 @@ def run_in_thread(fn):
 def _rasterize(
     in_file: Union[str, Path],
     output_path: Union[str, Path],
-    output_bounds: Optional[List[float]] = None,
+    output_bounds: List[float],
 ) -> Path:
-    output_bounds = output_bounds or [-180.0, -90.0, 180.0, 90.0]
     opts = gdal.RasterizeOptions(
         format="GTiff",
         outputType=gdalconst.GDT_Byte,
@@ -81,27 +79,28 @@ class HIIOSMRasterize(HIITask):
     1. Fetch OSM pbf file
     2. Convert PBF file -> Text file (filter by attribute/tag list)
     3.
-        a)Split up text file by attribute and tags and 1 million row CSV files
-        b)Clean geometry and write out road tags to a roads CSV file
-    4. Rasterize each CSV file.
-    5. Merge all tiff into 1 multiband tiff file
+        a) Split up text file into one CSV file per attribute/tag combination per 1 million rows
+        b) Clean geometry and write out road tags to a roads CSV file
+    4. Rasterize each CSV file
+    5. Merge all tiff images into 1 multiband tiff file and split image
     6. Upload to Google Storage
-    7. Clean up working directories and files.
+    7. Clean up working directories and files
 
     """
 
     ee_osm_root = "osm"
     google_creds_path = "/.google_creds"
     _asset_prefix = f"projects/{HIITask.ee_project}/{ee_osm_root}"
+    config_json = Path(Path(__file__).parent.absolute(), "osmium_config.json")
 
     MIN_GEOM_AREA = 5  # in meters
     POLYGON_PRECISION = 5
+    MAX_ROWS = 1000000
 
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
 
         self._args = kwargs
-        self.max_rows = 1000000
 
         _extent = self._args.get("extent")
         if _extent:
@@ -237,6 +236,11 @@ class HIIOSMRasterize(HIITask):
 
         self.upload_to_cloudstorage(backup_path, tar_name)
 
+    def _get_roads_tags(self) -> Dict[str, Tuple[str, str]]:
+        with open(self.config_json, "r") as f:
+            config = json.load(f)
+            return config["road_tags"]
+
     # Step 1
     def download_osm(self, osm_url: str, osm_file_path: Union[str, Path]) -> Path:
         with requests.get(osm_url, stream=True) as r:
@@ -271,6 +275,7 @@ class HIIOSMRasterize(HIITask):
         txt_file: str,
         output_dir: Union[str, Path],
         roads_file_path: Union[str, Path],
+        roads_tags: Dict[str, Tuple[str, str]]
     ) -> Tuple[List[Path], Path]:
         file_indicies: Dict[str, int] = dict()
         file_handlers = dict()
@@ -279,12 +284,11 @@ class HIIOSMRasterize(HIITask):
             Path(output_dir).mkdir(exist_ok=True)
 
         geod = Geod(ellps="WGS84")
-        max_rows = self.max_rows - 1
+        max_rows = self.MAX_ROWS - 1
         _parse_row = self._parse_row
         _create_file = self._create_file
         output_files = []
         roads_file = open(roads_file_path, "w")
-        roads_tags = {rt: rt.split("=") for rt in config.road_tags}
         roads_file.write('"wkt","attribute","tag"\n')
         with open(txt_file, "r") as fr:
             for row in fr:
@@ -327,10 +331,11 @@ class HIIOSMRasterize(HIITask):
             for f in csv_files
         ]
 
+        bounds = self.bounds
         num_cpus = multiprocessing.cpu_count() - 1 or 1
         with ProcessPoolExecutor(max_workers=num_cpus) as executor:
             results = executor.map(
-                _rasterize, csv_files, output_files, itertools.repeat(self.bounds)
+                _rasterize, csv_files, output_files, itertools.repeat(bounds)
             )
             for result in results:
                 if isinstance(result, Exception):
@@ -382,6 +387,7 @@ class HIIOSMRasterize(HIITask):
 
     def calc(self):
         self._working_directory = self._args.get("working_dir") or "/tmp"
+        roads_tags = self._get_roads_tags()
 
         osmium_text_file = self._args.get("osmium_text_file")
         osm_file = self._args.get("osm_file")
@@ -411,6 +417,7 @@ class HIIOSMRasterize(HIITask):
                 osmium_text_file,
                 Path(self._working_directory, "split_files"),
                 Path(self._working_directory, "roads.csv"),
+                roads_tags
             )
 
         with Timer("Rasterize CSV files"):
@@ -448,6 +455,7 @@ if __name__ == "__main__":
         "-f",
         "--osm_file",
         type=str,
+        default=None,
         help=(
             "Add local path to OSM source file."
             " If not provided, file will be downloaded"
@@ -457,12 +465,14 @@ if __name__ == "__main__":
         "-u",
         "--osm_url",
         type=str,
+        default="https://ftp.fau.de/osm-planet/pbf/planet-latest.osm.pbf",
         help="Set a different source url to download OSM pbf file.",
     )
 
     parser.add_argument(
         "--osmium_text_file",
         type=str,
+        default=None,
         help="Text file created from osmium export.",
     )
 
@@ -470,14 +480,21 @@ if __name__ == "__main__":
         "-w",
         "--working_dir",
         type=str,
+        default="/tmp",
         help="Working directory to store files and directories during processing.",
     )
 
-    parser.add_argument("--extent", type=str, help="Output geographic bounds.")
+    parser.add_argument(
+        "--extent",
+        type=str,
+        default="-180.0,-58.0,180.0,84.0",
+        help="Output geographic bounds."
+    )
 
     parser.add_argument(
         "--backup_step_data",
         action="store_true",
+        default=False,
         help="Backup up osm to text file to Google Cloud Storage",
     )
 

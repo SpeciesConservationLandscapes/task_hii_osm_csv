@@ -145,5 +145,36 @@
         "railway=station",
         "railway=subway",
         "railway=tram"
-    ]
+    ],
+    "road_tags": {
+        "highway=bridleway": ["highway", "ridleway"],
+        "highway=bus_guideway": ["highway", "bus_guideway"],
+        "highway=cycleway": ["highway", "cycleway"],
+        "highway=elevator": ["highway", "elevator"],
+        "highway=escape": ["highway", "escape"],
+        "highway=footway": ["highway", "footway"],
+        "highway=living_street": ["highway", "living_street"],
+        "highway=mini_roundabout": ["highway", "mini_roundabout"],
+        "highway=motorway": ["highway", "motorway"],
+        "highway=motorway_link": ["highway", "motorway_link"],
+        "highway=path": ["highway", "path"],
+        "highway=pedestrian": ["highway", "pedestrian"],
+        "highway=primary": ["highway", "primary"],
+        "highway=primary_link": ["highway", "primary_link"],
+        "highway=raceway": ["highway", "raceway"],
+        "highway=residential": ["highway", "residential"],
+        "highway=rest_area": ["highway", "rest_area"],
+        "highway=road": ["highway", "road"],
+        "highway=secondary": ["highway", "secondary"],
+        "highway=secondary_link": ["highway", "secondary_link"],
+        "highway=service": ["highway", "service"],
+        "highway=steps": ["highway", "steps"],
+        "highway=tertiary": ["highway", "tertiary"],
+        "highway=tertiary_link": ["highway", "tertiary_link"],
+        "highway=track": ["highway", "track"],
+        "highway=trunk": ["highway", "trunk"],
+        "highway=trunk_link": ["highway", "trunk_link"],
+        "highway=turning_circle": ["highway", "turning_circle"],
+        "highway=unclassified": ["highway", "unclassified"]
+    }
 }

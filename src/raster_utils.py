@@ -122,7 +122,14 @@ def split_image(
         if num_splits < 1:
             raise ValueError("num_splits less than 1")
         elif num_splits == 1:
-            return profile
+            meta = ImageStackMetadata()
+            meta.profile = profile
+            meta.source_images = image_paths
+            meta.x_read_offset = 0
+            meta.y_read_offset = 0
+            meta.read_windows = [Window(0, 0, profile["width"], profile["height"])]
+            meta.write_windows = meta.read_windows
+            return [meta]
 
         src_transform = ds.profile["transform"]
         width = profile["width"]
