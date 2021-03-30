@@ -449,7 +449,7 @@ class HIIOSMRasterize(HIITask):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-d", "--taskdate", default=datetime.now(timezone.utc).date())
     parser.add_argument(
         "-f",
@@ -487,7 +487,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--extent",
         type=str,
-        default="-180.0,-58.0,180.0,84.0",
+        default=",".join(map(str, HIITask.extent[0] + HIITask.extent[2])),
         help="Output geographic bounds."
     )
 
@@ -501,3 +501,4 @@ if __name__ == "__main__":
     options = parser.parse_args()
     task = HIIOSMRasterize(**vars(options))
     task.run()
+    

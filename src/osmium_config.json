@@ -147,7 +147,7 @@
         "railway=tram"
     ],
     "road_tags": {
-        "highway=bridleway": ["highway", "ridleway"],
+        "highway=bridleway": ["highway", "bridleway"],
         "highway=bus_guideway": ["highway", "bus_guideway"],
         "highway=cycleway": ["highway", "cycleway"],
         "highway=elevator": ["highway", "elevator"],
