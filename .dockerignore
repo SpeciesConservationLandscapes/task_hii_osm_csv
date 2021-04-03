@@ -1,0 +1,9 @@
+data/
+*.pbf
+src/*.pbf
+src/*.csv
+src/*.txt
+src/*.tif
+*.csv
+temp/
+temp/*.csv
