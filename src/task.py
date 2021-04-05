@@ -394,8 +394,12 @@ class HIIOSMRasterize(HIITask):
         if osm_file is None and osmium_text_file is None:
             with Timer("Download osm file"):
                 osm_url = self._args.get("osm_url") or os.environ["OSM_DATA_SOURCE"]
+                ext = "pbf"
+                urlfile_exts = osm_url.split("/")[-1].split(".")
+                if len(urlfile_exts) > 1:
+                    ext = ".".join(urlfile_exts[1:])
                 file_path = Path(
-                    self._working_directory, self._unique_file_name(ext="pbf")
+                    self._working_directory, self._unique_file_name(ext=ext)
                 )
                 osm_file = self.download_osm(osm_url, file_path)
 
