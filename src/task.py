@@ -258,7 +258,7 @@ class HIIOSMRasterize(HIITask):
                 "/usr/bin/osmium",
                 "export",
                 "-f text",
-                "-c osmium_config.json",
+                f"-c {self.config_json}",
                 "-O",
                 f"-o {(txt_file_path)}",
                 str(osm_file_path),
@@ -505,4 +505,3 @@ if __name__ == "__main__":
     options = parser.parse_args()
     task = HIIOSMRasterize(**vars(options))
     task.run()
-    
