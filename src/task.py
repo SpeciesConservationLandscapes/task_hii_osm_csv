@@ -102,7 +102,7 @@ class HIIOSMRasterize(HIITask):
         self._args = kwargs
 
         self.osmium_config = self._args.get("osmium_config")
-        self.process_roads = self._args.get("process_roads")
+        self.process_roads = not self._args.get("no_roads")
         _extent = self._args.get("extent")
         if _extent:
             self.bounds = [float(c) for c in self._args["extent"].split(",")]
@@ -507,9 +507,9 @@ if __name__ == "__main__":
         help="osmium config file",
     )
     parser.add_argument(
-        "--process_roads",
+        "--no_roads",
         action="store_true",
-        default=True,
+        default=False,
         help="save out separate roads csv",
     )
 
