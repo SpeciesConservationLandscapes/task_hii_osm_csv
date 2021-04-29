@@ -437,9 +437,11 @@ class HIIOSMRasterize(HIITask):
 
         with Timer("Upload tiff to GS"):
             image_uris = []
+            road_text_uri = ""
             for stacked_image in stacked_images:
                 image_uris.append(self.upload_to_cloudstorage(stacked_image))
-            road_text_uri = self.upload_to_cloudstorage(road_file_path)
+            if self.process_roads:
+                road_text_uri = self.upload_to_cloudstorage(road_file_path)
 
             metadata_file = self._create_image_metadata(
                 image_paths,
