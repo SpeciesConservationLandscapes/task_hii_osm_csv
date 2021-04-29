@@ -91,7 +91,6 @@ class HIIOSMRasterize(HIITask):
     ee_osm_root = "osm"
     google_creds_path = "/.google_creds"
     _asset_prefix = f"projects/{HIITask.ee_project}/{ee_osm_root}"
-    config_json = Path(Path(__file__).parent.absolute(), "osmium_config.json")
 
     MIN_GEOM_AREA = 5  # in meters
     POLYGON_PRECISION = 5
@@ -102,6 +101,8 @@ class HIIOSMRasterize(HIITask):
 
         self._args = kwargs
 
+        self.osmium_config = self._args.get("osmium_config")
+        self.process_roads = not self._args.get("no_roads")
         _extent = self._args.get("extent")
         if _extent:
             self.bounds = [float(c) for c in self._args["extent"].split(",")]
@@ -237,7 +238,7 @@ class HIIOSMRasterize(HIITask):
         self.upload_to_cloudstorage(backup_path, tar_name)
 
     def _get_roads_tags(self) -> Dict[str, Tuple[str, str]]:
-        with open(self.config_json, "r") as f:
+        with open(self.osmium_config, "r") as f:
             config = json.load(f)
             return config["road_tags"]
 
@@ -258,7 +259,7 @@ class HIIOSMRasterize(HIITask):
                 "/usr/bin/osmium",
                 "export",
                 "-f text",
-                "-c osmium_config.json",
+                f"-c {self.osmium_config}",
                 "-O",
                 f"-o {(txt_file_path)}",
                 str(osm_file_path),
@@ -288,8 +289,9 @@ class HIIOSMRasterize(HIITask):
         _parse_row = self._parse_row
         _create_file = self._create_file
         output_files = []
-        roads_file = open(roads_file_path, "w")
-        roads_file.write('"wkt","attribute","tag"\n')
+        if self.process_roads:
+            roads_file = open(roads_file_path, "w")
+            roads_file.write('"wkt","attribute","tag"\n')
         with open(txt_file, "r") as fr:
             for row in fr:
                 wkt, attribute_tags = _parse_row(row)
@@ -307,7 +309,7 @@ class HIIOSMRasterize(HIITask):
                     file_handlers[attr_tag].write(f'"{wkt}",\n')
                     file_indicies[attr_tag] += 1
 
-                    if attr_tag in roads_tags:
+                    if self.process_roads and attr_tag in roads_tags:
                         rd_attr_tag = roads_tags[attr_tag]
                         wkt = self._clean_geometry(wkt, geod)
                         if wkt is not None:
@@ -315,7 +317,8 @@ class HIIOSMRasterize(HIITask):
                                 f'"{wkt}","{rd_attr_tag[0]}","{rd_attr_tag[1]}"\n'
                             )
 
-        roads_file.close()
+        if self.process_roads:
+            roads_file.close()
 
         return output_files, Path(roads_file_path)
 
@@ -434,9 +437,11 @@ class HIIOSMRasterize(HIITask):
 
         with Timer("Upload tiff to GS"):
             image_uris = []
+            road_text_uri = ""
             for stacked_image in stacked_images:
                 image_uris.append(self.upload_to_cloudstorage(stacked_image))
-            road_text_uri = self.upload_to_cloudstorage(road_file_path)
+            if self.process_roads:
+                road_text_uri = self.upload_to_cloudstorage(road_file_path)
 
             metadata_file = self._create_image_metadata(
                 image_paths,
@@ -472,14 +477,12 @@ if __name__ == "__main__":
         default="https://ftp.fau.de/osm-planet/pbf/planet-latest.osm.pbf",
         help="Set a different source url to download OSM pbf file.",
     )
-
     parser.add_argument(
         "--osmium_text_file",
         type=str,
         default=None,
         help="Text file created from osmium export.",
     )
-
     parser.add_argument(
         "-w",
         "--working_dir",
@@ -487,22 +490,31 @@ if __name__ == "__main__":
         default="/tmp",
         help="Working directory to store files and directories during processing.",
     )
-
     parser.add_argument(
         "--extent",
         type=str,
         default=",".join(map(str, HIITask.extent[0] + HIITask.extent[2])),
         help="Output geographic bounds."
     )
-
     parser.add_argument(
         "--backup_step_data",
         action="store_true",
         default=False,
         help="Backup up osm to text file to Google Cloud Storage",
     )
+    parser.add_argument(
+        "--osmium_config",
+        type=str,
+        default=Path(Path(__file__).parent.absolute(), "osmium_config.json"),
+        help="osmium config file",
+    )
+    parser.add_argument(
+        "--no_roads",
+        action="store_true",
+        default=False,
+        help="save out separate roads csv",
+    )
 
     options = parser.parse_args()
     task = HIIOSMRasterize(**vars(options))
     task.run()
-    
