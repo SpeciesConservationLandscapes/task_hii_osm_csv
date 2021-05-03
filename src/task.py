@@ -51,8 +51,8 @@ def _rasterize(
         noData=0,
         initValues=0,
         burnValues=1,
-        xRes=0.003,
-        yRes=0.003,
+        xRes=0.00269,
+        yRes=0.00269,
         targetAlignedPixels=True,
         outputSRS="EPSG:4326",
         outputBounds=output_bounds,
@@ -278,7 +278,7 @@ class HIIOSMRasterize(HIITask):
         roads_file_path: Union[str, Path],
         roads_tags: Dict[str, Tuple[str, str]]
     ) -> Tuple[List[Path], Path]:
-        file_indicies: Dict[str, int] = dict()
+        file_indices: Dict[str, int] = dict()
         file_handlers = dict()
 
         if Path(output_dir).exists() is False:
@@ -300,14 +300,14 @@ class HIIOSMRasterize(HIITask):
                     continue
 
                 for attr_tag in attribute_tags:
-                    if (attr_tag not in file_handlers or file_indicies[attr_tag] >= max_rows):
+                    if (attr_tag not in file_handlers or file_indices[attr_tag] >= max_rows):
                         path, handle = _create_file(output_dir, attr_tag)
                         output_files.append(path)
                         file_handlers[attr_tag] = handle
-                        file_indicies[attr_tag] = 0
+                        file_indices[attr_tag] = 0
 
                     file_handlers[attr_tag].write(f'"{wkt}",\n')
-                    file_indicies[attr_tag] += 1
+                    file_indices[attr_tag] += 1
 
                     if self.process_roads and attr_tag in roads_tags:
                         rd_attr_tag = roads_tags[attr_tag]
