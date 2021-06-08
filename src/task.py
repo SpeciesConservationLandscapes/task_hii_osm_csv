@@ -99,15 +99,39 @@ class HIIOSMRasterize(HIITask):
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
 
-        self._args = kwargs
-
-        self.osmium_config = self._args.get("osmium_config")
-        self.process_roads = not self._args.get("no_roads")
-        _extent = self._args.get("extent")
+        self.osm_file = kwargs.get("osm_file")
+        self.osm_url = (
+            kwargs.get("osm_url")
+            or os.environ["OSM_DATA_SOURCE"]
+            or "https://ftp.fau.de/osm-planet/pbf/planet-latest.osm.pbf"
+        )
+        self.osmium_text_file = kwargs.get("osmium_text_file") or os.environ.get(
+            "osmium_text_file"
+        )
+        self._working_directory = (
+            kwargs.get("working_dir") or os.environ.get("working_dir") or "/tmp"
+        )
+        _extent = (
+            kwargs.get("extent")
+            or os.environ.get("extent")
+            or ",".join(map(str, HIITask.extent[0] + HIITask.extent[2]))
+        )
         if _extent:
-            self.bounds = [float(c) for c in self._args["extent"].split(",")]
+            self.bounds = [float(c) for c in _extent.split(",")]
         else:
             self.bounds = self.extent[0] + self.extent[2]
+        self.backup_step_data = (
+            kwargs["backup_step_data"]
+            or os.environ.get("backup_step_data")
+            or False
+        )
+        self.osmium_config = (
+            kwargs.get("osmium_config")
+            or os.environ.get("osmium_config")
+            or Path(Path(__file__).parent.absolute(), "osmium_config.json")
+        )
+        _no_roads = kwargs.get("no_roads") or os.environ.get("no_roads") or False
+        self.process_roads = not _no_roads
 
         creds_path = Path(self.google_creds_path)
         self.service_account_key = os.environ["SERVICE_ACCOUNT_KEY"]
@@ -150,7 +174,7 @@ class HIIOSMRasterize(HIITask):
 
     def _parse_row(self, row: str) -> Union[Tuple[str, List[str]], Tuple[None, None]]:
         idx = row.rindex(")") + 1
-        attr_tags = row[idx + 1:-1].split(",")
+        attr_tags = row[idx + 1 : -1].split(",")
 
         if not attr_tags or not attr_tags[0]:
             return None, None
@@ -217,7 +241,7 @@ class HIIOSMRasterize(HIITask):
     def _backup_step_data(
         self, file_paths: Union[str, Path, list], backup_name: Union[str, Path]
     ):
-        if self._args["backup_step_data"] is False:
+        if self.backup_step_data is False:
             return
 
         if isinstance(
@@ -276,7 +300,7 @@ class HIIOSMRasterize(HIITask):
         txt_file: str,
         output_dir: Union[str, Path],
         roads_file_path: Union[str, Path],
-        roads_tags: Dict[str, Tuple[str, str]]
+        roads_tags: Dict[str, Tuple[str, str]],
     ) -> Tuple[List[Path], Path]:
         file_indices: Dict[str, int] = dict()
         file_handlers = dict()
@@ -300,7 +324,10 @@ class HIIOSMRasterize(HIITask):
                     continue
 
                 for attr_tag in attribute_tags:
-                    if (attr_tag not in file_handlers or file_indices[attr_tag] >= max_rows):
+                    if (
+                        attr_tag not in file_handlers
+                        or file_indices[attr_tag] >= max_rows
+                    ):
                         path, handle = _create_file(output_dir, attr_tag)
                         output_files.append(path)
                         file_handlers[attr_tag] = handle
@@ -389,31 +416,29 @@ class HIIOSMRasterize(HIITask):
         print("Not Implemented")
 
     def calc(self):
-        self._working_directory = self._args.get("working_dir") or "/tmp"
         roads_tags = self._get_roads_tags()
 
-        osmium_text_file = self._args.get("osmium_text_file")
-        osm_file = self._args.get("osm_file")
-        if osm_file is None and osmium_text_file is None:
+        if self.osm_file is None and self.osmium_text_file is None:
             with Timer("Download osm file"):
-                osm_url = self._args.get("osm_url") or os.environ["OSM_DATA_SOURCE"]
                 ext = "pbf"
-                urlfile_exts = osm_url.split("/")[-1].split(".")
+                urlfile_exts = self.osm_url.split("/")[-1].split(".")
                 if len(urlfile_exts) > 1:
                     ext = ".".join(urlfile_exts[1:])
                 file_path = Path(
                     self._working_directory, self._unique_file_name(ext=ext)
                 )
-                osm_file = self.download_osm(osm_url, file_path)
+                self.osm_file = self.download_osm(self.osm_url, file_path)
 
-        if osmium_text_file is None:
+        if self.osmium_text_file is None:
             with Timer("Convert OSM to text file"):
-                osmium_text_file = Path(
+                self.osmium_text_file = Path(
                     self._working_directory, self._unique_file_name(ext="txt")
                 )
-                osmium_text_file = self.osm_to_txt(osm_file, osmium_text_file)
+                self.osmium_text_file = self.osm_to_txt(
+                    self.osm_file, self.osmium_text_file
+                )
                 self._backup_step_data(
-                    osmium_text_file,
+                    self.osmium_text_file,
                     self._unique_file_name(
                         ext="txt", prefix=f"pbf_text-{self.taskdate}"
                     ),
@@ -421,10 +446,10 @@ class HIIOSMRasterize(HIITask):
 
         with Timer("Split text file to CSV files"):
             csv_files, road_file_path = self.split_osmium_text_file(
-                osmium_text_file,
+                str(self.osmium_text_file),
                 Path(self._working_directory, "split_files"),
                 Path(self._working_directory, "roads.csv"),
-                roads_tags
+                roads_tags,
             )
 
         with Timer("Rasterize CSV files"):
@@ -458,13 +483,14 @@ class HIIOSMRasterize(HIITask):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("-d", "--taskdate", default=datetime.now(timezone.utc).date())
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("-d", "--taskdate")
     parser.add_argument(
         "-f",
         "--osm_file",
         type=str,
-        default=None,
         help=(
             "Add local path to OSM source file."
             " If not provided, file will be downloaded"
@@ -474,44 +500,37 @@ if __name__ == "__main__":
         "-u",
         "--osm_url",
         type=str,
-        default="https://ftp.fau.de/osm-planet/pbf/planet-latest.osm.pbf",
         help="Set a different source url to download OSM pbf file.",
     )
     parser.add_argument(
         "--osmium_text_file",
         type=str,
-        default=None,
         help="Text file created from osmium export.",
     )
     parser.add_argument(
         "-w",
         "--working_dir",
         type=str,
-        default="/tmp",
         help="Working directory to store files and directories during processing.",
     )
     parser.add_argument(
         "--extent",
         type=str,
-        default=",".join(map(str, HIITask.extent[0] + HIITask.extent[2])),
-        help="Output geographic bounds."
+        help="Output geographic bounds.",
     )
     parser.add_argument(
         "--backup_step_data",
         action="store_true",
-        default=False,
         help="Backup up osm to text file to Google Cloud Storage",
     )
     parser.add_argument(
         "--osmium_config",
         type=str,
-        default=Path(Path(__file__).parent.absolute(), "osmium_config.json"),
         help="osmium config file",
     )
     parser.add_argument(
         "--no_roads",
         action="store_true",
-        default=False,
         help="save out separate roads csv",
     )
 
