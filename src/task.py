@@ -133,14 +133,6 @@ class HIIOSMRasterize(HIITask):
         _no_roads = kwargs.get("no_roads") or os.environ.get("no_roads") or False
         self.process_roads = not _no_roads
 
-        creds_path = Path(self.google_creds_path)
-        self.service_account_key = os.environ["SERVICE_ACCOUNT_KEY"]
-        if creds_path.exists() is False:
-            with open(creds_path, "w") as f:
-                f.write(self.service_account_key)
-
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self.google_creds_path
-
     def _unique_file_name(self, ext: str, prefix: Optional[str] = None) -> str:
         name = f"{uuid.uuid4()}.{ext}"
         if prefix:
@@ -487,6 +479,11 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("-d", "--taskdate")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="overwrite existing outputs instead of incrementing",
+    )
     parser.add_argument(
         "-f",
         "--osm_file",
