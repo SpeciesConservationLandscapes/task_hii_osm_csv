@@ -4,24 +4,21 @@ import json
 import math
 import multiprocessing
 import os
-import re
 import shutil
 import subprocess
 import tarfile
 import threading
 import uuid
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
 import requests
-from google.cloud.storage import Client  # type: ignore
 from osgeo import gdal, gdalconst  # type: ignore
 from pyproj import Geod  # type: ignore
 from shapely import wkt as shp_wkt  # type: ignore
 from shapely.validation import explain_validity  # type: ignore
-from task_base import HIITask  # type: ignore
+from task_base import HIITask, ConversionException  # type: ignore
 
 import raster_utils
 from timer import Timer
@@ -67,10 +64,6 @@ def _rasterize(
     return Path(output_path)
 
 
-class ConversionException(Exception):
-    pass
-
-
 class HIIOSMRasterize(HIITask):
     """
 
@@ -95,6 +88,7 @@ class HIIOSMRasterize(HIITask):
     MIN_GEOM_AREA = 5  # in meters
     POLYGON_PRECISION = 5
     MAX_ROWS = 1000000
+    DEFAULT_BUCKET = os.environ["HII_OSM_BUCKET"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
@@ -121,9 +115,7 @@ class HIIOSMRasterize(HIITask):
         else:
             self.bounds = self.extent[0] + self.extent[2]
         self.backup_step_data = (
-            kwargs["backup_step_data"]
-            or os.environ.get("backup_step_data")
-            or False
+            kwargs["backup_step_data"] or os.environ.get("backup_step_data") or False
         )
         self.osmium_config = (
             kwargs.get("osmium_config")
@@ -139,21 +131,6 @@ class HIIOSMRasterize(HIITask):
             name = f"{prefix}-{name}"
 
         return name
-
-    def _parse_task_id(self, output: Union[str, bytes]) -> Optional[str]:
-        if isinstance(output, bytes):
-            text = output.decode("utf-8")
-        else:
-            text = output
-
-        task_id_regex = re.compile(r"(?<=ID: ).*", flags=re.IGNORECASE)
-        try:
-            matches = task_id_regex.search(text)
-            if matches is None:
-                return None
-            return matches[0]
-        except TypeError:
-            return None
 
     def _create_file(
         self, directory: Union[str, Path], attributes_tag: str
@@ -390,18 +367,13 @@ class HIIOSMRasterize(HIITask):
 
         return output_image_paths
 
-    # Step 6
+    # Step 6: self.upload_to_cloudstorage
     def upload_to_cloudstorage(
         self, src_path: Union[str, Path], name: Optional[str] = None
     ) -> str:
         targ_name = name or Path(src_path).name
         targ_path = Path(str(self.taskdate), targ_name)
-        client = Client()
-        bucket = client.bucket(os.environ["HII_OSM_BUCKET"])
-        blob = bucket.blob(str(targ_path))
-        blob.upload_from_filename(str(src_path), timeout=3600)
-
-        return f"gs://{os.environ['HII_OSM_BUCKET']}/{targ_path}"
+        return super().upload_to_cloudstorage(src_path, targ_path)
 
     # Step 7
     def cleanup_working_files(self):
