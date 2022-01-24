@@ -19,7 +19,6 @@ HII OSM CSV
 ```
 SERVICE_ACCOUNT_KEY=<GOOGLE SERVICE ACCOUNT KEY>
 HII_OSM_BUCKET=hii-osm
-OSM_DATA_SOURCE=https://osm.openarchive.site/planet-latest.osm.pbf
 ```
 
 ## Usage

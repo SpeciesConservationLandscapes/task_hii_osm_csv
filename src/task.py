@@ -88,7 +88,14 @@ class HIIOSMRasterize(HIITask):
     MIN_GEOM_AREA = 5  # in meters
     POLYGON_PRECISION = 5
     MAX_ROWS = 1000000
-    DEFAULT_BUCKET = os.environ["HII_OSM_BUCKET"]
+    DEFAULT_BUCKET = os.environ.get("HII_OSM_BUCKET", "hii-osm")
+
+    # TODO: make this get the most recent available prior to self.taskdate, or None
+    def _get_osm_url(self):
+        year = self.taskdate.strftime("%Y")
+        planetdate = self.taskdate.strftime("%y%m%d")
+        url = f"https://planet.osm.org/planet/{year}/planet-{planetdate}.osm.bz2"
+        return url
 
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
@@ -96,7 +103,7 @@ class HIIOSMRasterize(HIITask):
         self.osm_file = kwargs.get("osm_file")
         self.osm_url = (
             kwargs.get("osm_url")
-            or os.environ["OSM_DATA_SOURCE"]
+            or self._get_osm_url()
             or "https://ftp.fau.de/osm-planet/pbf/planet-latest.osm.pbf"
         )
         self.osmium_text_file = kwargs.get("osmium_text_file") or os.environ.get(
