@@ -135,3 +135,4 @@ src/*.csv
 .vscode/
 data/*  
 test.sh
+.idea/
