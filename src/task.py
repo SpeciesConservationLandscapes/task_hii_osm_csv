@@ -94,7 +94,8 @@ class HIIOSMRasterize(HIITask):
     def _get_osm_url(self):
         year = self.taskdate.strftime("%Y")
         planetdate = self.taskdate.strftime("%y%m%d")
-        url = f"https://planet.osm.org/planet/{year}/planet-{planetdate}.osm.bz2"
+        # url = f"https://planet.osm.org/planet/{year}/planet-{planetdate}.osm.bz2"
+        url = f"https://ftp.fau.de/osm-planet/pbf/planet-{planetdate}.osm.pbf"
         return url
 
     def __init__(self, *args, **kwargs):
