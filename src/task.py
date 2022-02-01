@@ -10,6 +10,7 @@ import tarfile
 import threading
 import uuid
 from concurrent.futures import ProcessPoolExecutor
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
@@ -90,28 +91,52 @@ class HIIOSMRasterize(HIITask):
     MAX_ROWS = 1000000
     DEFAULT_BUCKET = os.environ.get("HII_OSM_BUCKET", "hii-osm")
 
-    # TODO: make this get the most recent available prior to self.taskdate, or None
     def _get_osm_url(self):
-        year = self.taskdate.strftime("%Y")
-        planetdate = self.taskdate.strftime("%y%m%d")
-        # url = f"https://planet.osm.org/planet/{year}/planet-{planetdate}.osm.bz2"
-        url = f"https://ftp.fau.de/osm-planet/pbf/planet-{planetdate}.osm.pbf"
-        return url
+        maxage = 6
+
+        def _try_osm_urls(urlbase):
+            days_past = 0
+            while days_past <= maxage:
+                request_date = self.taskdate - timedelta(days=days_past)
+                params = {
+                    "year": request_date.strftime("%Y"),
+                    "planetdate": request_date.strftime("%y%m%d"),
+                }
+                url = urlbase.format(**params)
+                r = requests.head(url)
+                if r.status_code in (requests.codes.ok, requests.codes.found):
+                    return url
+                days_past += 1
+
+            return None
+
+        days_past = (date.today() - self.taskdate).days
+        if days_past <= maxage:
+            return "https://ftp.fau.de/osm-planet/pbf/planet-latest.osm.pbf"
+        else:
+            # fau.de pbf files are twice as fast as bz2 for osmium but are stored for only 2 years
+            return (
+                _try_osm_urls(
+                    "https://ftp.fau.de/osm-planet/pbf/planet-{planetdate}.osm.pbf"
+                )
+                or _try_osm_urls(
+                    "https://planet.osm.org/planet/{year}/planet-{planetdate}.osm.bz2"
+                )
+                or ValueError(
+                    f"No OSM source file could be found for {maxage} days prior to {self.taskdate}."
+                )
+            )
 
     def __init__(self, *args, **kwargs):
         super().__init__(self, *args, **kwargs)
 
         self.osm_file = kwargs.get("osm_file")
-        self.osm_url = (
-            kwargs.get("osm_url")
-            or self._get_osm_url()
-            or "https://ftp.fau.de/osm-planet/pbf/planet-latest.osm.pbf"
-        )
+        self.osm_url = kwargs.get("osm_url") or self._get_osm_url()
         self.osmium_text_file = kwargs.get("osmium_text_file") or os.environ.get(
             "osmium_text_file"
         )
         self._working_directory = (
-            kwargs.get("working_dir") or os.environ.get("working_dir") or "/tmp"
+            kwargs.get("working_dir") or os.environ.get("working_dir") or "/data"
         )
         _extent = (
             kwargs.get("extent")
@@ -243,7 +268,7 @@ class HIIOSMRasterize(HIITask):
             config = json.load(f)
             return config["road_tags"]
 
-    # Step 1
+    # Step 1  ~40 mins
     def download_osm(self, osm_url: str, osm_file_path: Union[str, Path]) -> Path:
         with requests.get(osm_url, stream=True) as r:
             with open(osm_file_path, "wb") as f:
@@ -251,7 +276,7 @@ class HIIOSMRasterize(HIITask):
 
         return Path(osm_file_path)
 
-    # Step 2
+    # Step 2  ~13 hrs
     def osm_to_txt(
         self, osm_file_path: Union[str, Path], txt_file_path: Union[str, Path]
     ) -> Path:
@@ -271,7 +296,7 @@ class HIIOSMRasterize(HIITask):
         except subprocess.CalledProcessError as err:
             raise ConversionException(err.stdout)
 
-    # Step 3
+    # Step 3  ~2 hrs
     def split_osmium_text_file(  # noqa: C901
         self,
         txt_file: str,
@@ -326,7 +351,7 @@ class HIIOSMRasterize(HIITask):
 
         return output_files, Path(roads_file_path)
 
-    # Step 4
+    # Step 4  ~7 hrs
     def rasterize(
         self, csv_files: List[Union[str, Path]], output_dir: Union[str, Path]
     ) -> List[Path]:
@@ -344,13 +369,14 @@ class HIIOSMRasterize(HIITask):
             results = executor.map(
                 _rasterize, csv_files, output_files, itertools.repeat(bounds)
             )
+            # TODO: this doesn't seem to raise an exception if one of the rasterizations fails
             for result in results:
                 if isinstance(result, Exception):
                     raise result
 
         return output_files
 
-    # Step 5
+    # Step 5  ~1 hr
     def stack_images(
         self, image_paths: List[Union[str, Path]], output_dir: Union[str, Path]
     ) -> List[Path]:
