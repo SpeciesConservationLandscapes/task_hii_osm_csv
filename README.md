@@ -4,10 +4,10 @@ HII OSM CSV
 ## What does this task do?
 
 1. Fetch OSM pbf file
-2. Convert PBF file -> Text file (filter by attribute/tag list)
-3.
-  a) Split up text file into one CSV file per attribute/tag combination per 1 million rows
-  b) Clean geometry and write out road tags to a roads CSV file
+2. Convert PBF file -> text file (filter by attribute/tag list)
+3.  
+    a) Split up text file into one CSV file per attribute/tag combination per 1 million rows  
+    b) Clean geometry and write out road tags to a roads CSV file
 4. Rasterize each CSV file
 5. Merge all tiff images into 1 multiband tiff file and split image
 6. Upload to Google Storage
@@ -18,7 +18,10 @@ HII OSM CSV
 
 ```
 SERVICE_ACCOUNT_KEY=<GOOGLE SERVICE ACCOUNT KEY>
-HII_OSM_BUCKET=hii-osm
+MIN_GEOM_AREA = 5  # in meters
+POLYGON_PRECISION = 5
+MAX_ROWS = 1000000
+DEFAULT_BUCKET = os.environ.get("HII_OSM_BUCKET", "hii-osm")
 ```
 
 ## Usage
@@ -55,3 +58,11 @@ optional arguments:
                         osmium config file (default: None)
   --no_roads            save out separate roads csv (default: False)
 ```
+
+### License
+Copyright (C) 2022 Wildlife Conservation Society
+The files in this repository  are part of the task framework for calculating 
+Human Impact Index and Species Conservation Landscapes (https://github.com/SpeciesConservationLandscapes) 
+and are released under the GPL license:
+https://www.gnu.org/licenses/#GPL
+See [LICENSE](./LICENSE) for details.
