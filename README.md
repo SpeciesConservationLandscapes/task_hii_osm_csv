@@ -16,6 +16,8 @@ HII OSM CSV
 
 ## Environment Variables
 
+Refer to [`.env.example`](/.env.example) to setup your env locally
+
 ```
 SERVICE_ACCOUNT_KEY=<GOOGLE SERVICE ACCOUNT KEY>
 MIN_GEOM_AREA = 5  # in meters
