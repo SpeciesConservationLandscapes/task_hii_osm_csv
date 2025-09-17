@@ -92,43 +92,62 @@ class HIIOSMRasterize(HIITask):
     DEFAULT_BUCKET = os.environ.get("HII_OSM_BUCKET", "hii-osm")
 
     def _get_osm_url(self):
-        maxage = 6
-
-        def _try_osm_urls(urlbase):
+        # maxage = 6
+        """ attempt to retrieve an osm file up to `maxage` old compared to taskdate """
+        def _try_osm_urls(urlbase, ref_date:date, maxage:int):
             days_past = 0
             while days_past <= maxage:
-                request_date = self.taskdate - timedelta(days=days_past)
+                request_date = ref_date - timedelta(days=days_past)
+                # request_date = self.taskdate - timedelta(days=days_past)
                 params = {
                     "year": request_date.strftime("%Y"),
                     "planetdate": request_date.strftime("%y%m%d"),
                 }
                 url = urlbase.format(**params)
                 r = requests.head(url)
-                if r.status_code in (requests.codes.ok, requests.codes.found):
+                if r.status_code == requests.codes.ok:
                     return url
+                # Kyle: for planet.osm location, all date-formatted urls return found (302), although only some have valid redirect urls
+                if r.status_code == requests.codes.found:
+                    redirected_url = r.headers['Location']
+                    new_response = requests.head(redirected_url)
+                    if new_response.status_code==requests.codes.ok:
+                        return redirected_url
                 days_past += 1
-
+            
             return None
-
+        rt_maxage=6
         days_past = (date.today() - self.taskdate).days
-        if days_past <= maxage:
+        if days_past <= rt_maxage:
             return "https://ftp.fau.de/osm-planet/pbf/planet-latest.osm.pbf"
         else:
-            # fau.de pbf files are twice as fast as bz2 for osmium but are stored for only 2 years
+            # running retroactively: enforce temporal consistency across potential data sources (end of year retrievals to match planet.osm's limited avail)
+            end_of_year = date(self.taskdate.year,12,10) # planet.osm.org typically has an archive bw late Nov/early Dec for each year
+            
+            urlbase_faude = "https://ftp.fau.de/osm-planet/pbf/planet-{planetdate}.osm.pbf"
+            maxage_faude = 6
+            
+            urlbase_planetosm = "https://planet.osm.org/planet/{year}/planet-{planetdate}.osm.bz2"
+            maxage_planetosm = 60
             return (
                 _try_osm_urls(
-                    "https://ftp.fau.de/osm-planet/pbf/planet-{planetdate}.osm.pbf"
+                    urlbase_faude, # twice as fast to process as bz2, stored weekly since 2020-01-09 (as of 2025-09-15)
+                    ref_date = end_of_year,
+                    maxage=maxage_faude
                 )
                 or _try_osm_urls(
-                    "https://planet.osm.org/planet/{year}/planet-{planetdate}.osm.bz2"
-                )
+                    urlbase_planetosm, # one end-of-year archive available per year (around December 5) back to 2012 (as of 2025-09-15)
+                    ref_date = end_of_year,
+                    maxage=maxage_planetosm)
                 or ValueError(
-                    f"No OSM source file could be found for {maxage} days prior to {self.taskdate}."
+                    f"No OSM source file could be found at {urlbase_faude} within {maxage_faude} days of end-year reference date: {end_of_year};"+
+                    f"No OSM source file could be found at {urlbase_planetosm} within {maxage_planetosm} days of end-year reference date {end_of_year};"
                 )
             )
 
     def __init__(self, *args, **kwargs):
-        super().__init__(self, *args, **kwargs)
+        super().__init__(*args, **kwargs)
+        # super().__init__(self, *args, **kwargs)
 
         self.osm_file = kwargs.get("osm_file")
         self.osm_url = kwargs.get("osm_url") or self._get_osm_url()
@@ -138,6 +157,7 @@ class HIIOSMRasterize(HIITask):
         self._working_directory = (
             kwargs.get("working_dir") or os.environ.get("working_dir") or "/data"
         )
+        Path(self._working_directory).mkdir(parents=True, exist_ok=True)
         _extent = (
             kwargs.get("extent")
             or os.environ.get("extent")
@@ -147,16 +167,18 @@ class HIIOSMRasterize(HIITask):
             self.bounds = [float(c) for c in _extent.split(",")]
         else:
             self.bounds = self.extent[0] + self.extent[2]
-        self.backup_step_data = (
-            kwargs["backup_step_data"] or os.environ.get("backup_step_data") or False
-        )
+        # The 'or' chain allows env vars to override argparse's default 'False'.
+        # We make it more robust by handling string-to-bool conversion.
+        backup_val = kwargs.get("backup_step_data") or os.environ.get("backup_step_data") or False
+        self.backup_step_data = str(backup_val).lower() in ("true", "1", "t", "y", "yes")
+
         self.osmium_config = (
             kwargs.get("osmium_config")
             or os.environ.get("osmium_config")
             or Path(Path(__file__).parent.absolute(), "osmium_config.json")
         )
-        _no_roads = kwargs.get("no_roads") or os.environ.get("no_roads") or False
-        self.process_roads = not _no_roads
+        no_roads_val = kwargs.get("no_roads") or os.environ.get("no_roads") or False
+        self.process_roads = not (str(no_roads_val).lower() in ("true", "1", "t", "y", "yes"))
 
     def _unique_file_name(self, ext: str, prefix: Optional[str] = None) -> str:
         name = f"{uuid.uuid4()}.{ext}"
@@ -270,6 +292,9 @@ class HIIOSMRasterize(HIITask):
 
     # Step 1  ~40 mins
     def download_osm(self, osm_url: str, osm_file_path: Union[str, Path]) -> Path:
+        """
+        download OSM history file from an online archive to a temp file
+        """
         with requests.get(osm_url, stream=True) as r:
             with open(osm_file_path, "wb") as f:
                 shutil.copyfileobj(r.raw, f)
@@ -280,6 +305,9 @@ class HIIOSMRasterize(HIITask):
     def osm_to_txt(
         self, osm_file_path: Union[str, Path], txt_file_path: Union[str, Path]
     ) -> Path:
+        """
+        use osmium CLI tool to export osm file to text format
+        """
         try:
             cmd = [
                 "/usr/bin/osmium",
@@ -304,6 +332,9 @@ class HIIOSMRasterize(HIITask):
         roads_file_path: Union[str, Path],
         roads_tags: Dict[str, Tuple[str, str]],
     ) -> Tuple[List[Path], Path]:
+        """
+        shard osmium text file into individual .csv files organized by osm tags, up to self.MAX_ROWS records per .csv
+        """
         file_indices: Dict[str, int] = dict()
         file_handlers = dict()
 
@@ -355,6 +386,9 @@ class HIIOSMRasterize(HIITask):
     def rasterize(
         self, csv_files: List[Union[str, Path]], output_dir: Union[str, Path]
     ) -> List[Path]:
+        """
+        Rasterize each collection of osm features in csv_files, saving tiled .tif's to an output directory
+        """
         if Path(output_dir).exists() is False:
             Path(output_dir).mkdir(exist_ok=True)
 
@@ -380,7 +414,11 @@ class HIIOSMRasterize(HIITask):
     def stack_images(
         self, image_paths: List[Union[str, Path]], output_dir: Union[str, Path]
     ) -> List[Path]:
-
+        """
+        Stack individual (tag-organized) .tifs into a collection of multiband .tifs. 
+            Result will be mutli-band .tifs (n = cpus on your machine) 
+            each with # of bands = total unique osm tags you specified in the osmium_config.json
+        """
         num_cpus = math.ceil((multiprocessing.cpu_count() - 1) / 2.0) or 1
         output_image_paths = [
             Path(output_dir, f"stacked-{n+1}.tif") for n in range(num_cpus)
@@ -405,6 +443,7 @@ class HIIOSMRasterize(HIITask):
     def upload_to_cloudstorage(
         self, src_path: Union[str, Path], name: Optional[str] = None
     ) -> str:
+        """upload local file to cloud storage"""
         targ_name = name or Path(src_path).name
         targ_path = Path(str(self.taskdate), targ_name)
         return super().upload_to_cloudstorage(src_path, targ_path)
@@ -415,7 +454,6 @@ class HIIOSMRasterize(HIITask):
 
     def calc(self):
         roads_tags = self._get_roads_tags()
-
         if self.osm_file is None and self.osmium_text_file is None:
             with Timer("Download osm file"):
                 ext = "pbf"
@@ -425,6 +463,7 @@ class HIIOSMRasterize(HIITask):
                 file_path = Path(
                     self._working_directory, self._unique_file_name(ext=ext)
                 )
+                print(f"downloading file from: {self.osm_url} to {file_path}")
                 self.osm_file = self.download_osm(self.osm_url, file_path)
 
         if self.osmium_text_file is None:
@@ -485,6 +524,8 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("-d", "--taskdate")
+    
+    # KYLE: this arg not implemented
     parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -519,7 +560,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--extent",
         type=str,
-        help="Output geographic bounds.",
+        help="Output geographic bounds (west,south,east,north).",
     )
     parser.add_argument(
         "--backup_step_data",
