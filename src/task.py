@@ -92,13 +92,12 @@ class HIIOSMRasterize(HIITask):
     DEFAULT_BUCKET = os.environ.get("HII_OSM_BUCKET", "hii-osm")
 
     def _get_osm_url(self):
-        # maxage = 6
-        """ attempt to retrieve an osm file up to `maxage` old compared to taskdate """
-        def _try_osm_urls(urlbase, ref_date:date, maxage:int):
+        """Depending on taskdate provided, find the most recent osm history file from one of two archive locations"""
+        def _try_osm_urls(urlbase, maxage:int):
+            """ attempt to retrieve an osm file up to `maxage` old compared to taskdate from an archive location"""
             days_past = 0
             while days_past <= maxage:
-                request_date = ref_date - timedelta(days=days_past)
-                # request_date = self.taskdate - timedelta(days=days_past)
+                request_date = self.taskdate - timedelta(days=days_past)
                 params = {
                     "year": request_date.strftime("%Y"),
                     "planetdate": request_date.strftime("%y%m%d"),
@@ -107,7 +106,7 @@ class HIIOSMRasterize(HIITask):
                 r = requests.head(url)
                 if r.status_code == requests.codes.ok:
                     return url
-                # Kyle: for planet.osm location, all date-formatted urls return found (302), although only some have valid redirect urls
+                # for planet.osm location, all date-formatted urls return found (302), although only some have valid redirect urls, so we follow all redirect urls and verify first
                 if r.status_code == requests.codes.found:
                     redirected_url = r.headers['Location']
                     new_response = requests.head(redirected_url)
@@ -116,14 +115,16 @@ class HIIOSMRasterize(HIITask):
                 days_past += 1
             
             return None
+        
         rt_maxage=6
         days_past = (date.today() - self.taskdate).days
+        
+        # running in real-time: use latest osm file from taskdate
         if days_past <= rt_maxage:
             return "https://ftp.fau.de/osm-planet/pbf/planet-latest.osm.pbf"
+        
+        # running retroactively: first look for osm.pbf file in ftp.fau.de (shorter history, denser history snapshots after 2020-01), if unsuccessful, look at planet.osm.org (longer history, fewer history snapshot files)
         else:
-            # running retroactively: enforce temporal consistency across potential data sources (end of year retrievals to match planet.osm's limited avail)
-            end_of_year = date(self.taskdate.year,12,10) # planet.osm.org typically has an archive bw late Nov/early Dec for each year
-            
             urlbase_faude = "https://ftp.fau.de/osm-planet/pbf/planet-{planetdate}.osm.pbf"
             maxage_faude = 6
             
@@ -132,16 +133,14 @@ class HIIOSMRasterize(HIITask):
             return (
                 _try_osm_urls(
                     urlbase_faude, # twice as fast to process as bz2, stored weekly since 2020-01-09 (as of 2025-09-15)
-                    ref_date = end_of_year,
                     maxage=maxage_faude
                 )
                 or _try_osm_urls(
                     urlbase_planetosm, # one end-of-year archive available per year (around December 5) back to 2012 (as of 2025-09-15)
-                    ref_date = end_of_year,
                     maxage=maxage_planetosm)
                 or ValueError(
-                    f"No OSM source file could be found at {urlbase_faude} within {maxage_faude} days of end-year reference date: {end_of_year};"+
-                    f"No OSM source file could be found at {urlbase_planetosm} within {maxage_planetosm} days of end-year reference date {end_of_year};"
+                    f"No OSM source file could be found at {urlbase_faude} within {maxage_faude} days of taskdate: {self.taskdate};"+
+                    f"No OSM source file could be found at {urlbase_planetosm} within {maxage_planetosm} days of taskdate: {self.taskdate};"
                 )
             )
 
@@ -180,6 +179,8 @@ class HIIOSMRasterize(HIITask):
         no_roads_val = kwargs.get("no_roads") or os.environ.get("no_roads") or False
         self.process_roads = not (str(no_roads_val).lower() in ("true", "1", "t", "y", "yes"))
 
+        self.cleanup = kwargs.get("cleanup") or os.environ.get("cleanup") or False
+
     def _unique_file_name(self, ext: str, prefix: Optional[str] = None) -> str:
         name = f"{uuid.uuid4()}.{ext}"
         if prefix:
@@ -211,6 +212,7 @@ class HIIOSMRasterize(HIITask):
         image_paths: List[Union[str, Path]],
         output_image_uris: List[str],
         road_uri: str,
+        osm_url: str,
         output_file: Union[str, Path],
     ) -> Path:
         bands_metadata: Dict[str, Any] = dict()
@@ -228,6 +230,7 @@ class HIIOSMRasterize(HIITask):
             bands=bands_metadata,
             images=[str(oip) for oip in output_image_uris],
             road=road_uri,
+            osm_url=osm_url
         )
 
         with open(output_file, "w") as f:
@@ -290,6 +293,11 @@ class HIIOSMRasterize(HIITask):
             config = json.load(f)
             return config["road_tags"]
 
+    def clean_up(self, **kwargs):
+        if Path(self._working_directory).exists():
+            print(f"removing working directory and its contents: {self._working_directory}")
+            shutil.rmtree(self._working_directory, ignore_errors=True)
+    
     # Step 1  ~40 mins
     def download_osm(self, osm_url: str, osm_file_path: Union[str, Path]) -> Path:
         """
@@ -415,7 +423,7 @@ class HIIOSMRasterize(HIITask):
         self, image_paths: List[Union[str, Path]], output_dir: Union[str, Path]
     ) -> List[Path]:
         """
-        Stack individual (tag-organized) .tifs into a collection of multiband .tifs. 
+        Stack individual osm tag .tifs into a collection of multiband .tifs. 
             Result will be mutli-band .tifs (n = cpus on your machine) 
             each with # of bands = total unique osm tags you specified in the osmium_config.json
         """
@@ -450,7 +458,8 @@ class HIIOSMRasterize(HIITask):
 
     # Step 7
     def cleanup_working_files(self):
-        print("Not Implemented")
+        if self.cleanup:
+            self.clean_up()
 
     def calc(self):
         roads_tags = self._get_roads_tags()
@@ -509,6 +518,7 @@ class HIIOSMRasterize(HIITask):
                 image_paths,
                 image_uris,
                 road_text_uri,
+                self.osm_url,
                 Path(self._working_directory, "metadata.json"),
             )
             gs_metadata_uri = self.upload_to_cloudstorage(metadata_file)
@@ -517,6 +527,9 @@ class HIIOSMRasterize(HIITask):
             for image_uri in image_uris:
                 print(f"\t{image_uri}")
             print(f"Road uri: {road_text_uri}")
+    
+        with Timer("Clean-Up"):
+            self.cleanup_working_files()
 
 
 if __name__ == "__main__":
@@ -576,6 +589,12 @@ if __name__ == "__main__":
         "--no_roads",
         action="store_true",
         help="save out separate roads csv",
+    )
+
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="delete local intermediary files"
     )
 
     options = parser.parse_args()

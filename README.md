@@ -35,7 +35,7 @@ DEFAULT_BUCKET = os.environ.get("HII_OSM_BUCKET", "hii-osm")
 usage: task.py [-h] [-d TASKDATE] [--overwrite] [-f OSM_FILE] [-u OSM_URL]
                [--osmium_text_file OSMIUM_TEXT_FILE] [-w WORKING_DIR]
                [--extent EXTENT] [--backup_step_data]
-               [--osmium_config OSMIUM_CONFIG] [--no_roads]
+               [--osmium_config OSMIUM_CONFIG] [--no_roads] [--cleanup]
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -59,6 +59,7 @@ optional arguments:
   --osmium_config OSMIUM_CONFIG
                         osmium config file (default: None)
   --no_roads            save out separate roads csv (default: False)
+  --cleanup             delete local intermediary files (default: False)
 ```
 
 ### License
